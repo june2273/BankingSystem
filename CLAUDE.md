@@ -8,22 +8,30 @@ A Java banking system implementing customer management, account handling, and tr
 
 ## Build & Run
 
-This is a plain IntelliJ IDEA project (no Maven/Gradle). Build and run via the command line:
+This is a plain IntelliJ IDEA project (no Maven/Gradle). It depends on the **H2 database** JDBC driver (`lib/h2-2.2.224.jar`), so the jar must be on the classpath for both compile and run.
 
 ```bash
-# Compile all sources
-javac -d out src/*.java
+# Compile all sources (H2 jar on classpath)
+javac --enable-preview --release 25 -cp "lib/*" -d out src/*.java
 
-# Run
-java -cp out Main
+# Run (out dir + H2 jar on classpath)
+java --enable-preview -cp "out:lib/*" Main
 ```
 
-Java version: **JDK 25** (configured in `.idea/misc.xml` as `openjdk-25`). Use `--enable-preview` if instance main methods (JEP 445) are used, as the current `Main.java` uses the preview `void main()` syntax.
+Java version: **JDK 25** (configured in `.idea/misc.xml` as `openjdk-25`). `--enable-preview` is required because `Main.java` uses preview features. In IntelliJ, add `lib/h2-2.2.224.jar` as a module library (Project Structure → Libraries).
 
-```bash
-javac --enable-preview --release 25 -d out src/*.java
-java --enable-preview -cp out Main
-```
+## Database (H2, embedded)
+
+- All state is persisted to an embedded H2 file DB at `./data/bank.mv.db` (gitignored). The connection URL is `jdbc:h2:./data/bank;AUTO_SERVER=TRUE` — `AUTO_SERVER=TRUE` lets the H2 Console / IntelliJ connect concurrently while the app runs.
+- Schema (`customers`, `accounts`, `transactions`) is auto-created on startup by `Database.init()`. Tables: `customers` (PK customer_id), `accounts` (PK account_number, FK customer_id, balance), `transactions` (id, account_number, type DEPOSIT|WITHDRAW|TRANSFER, amount, target_account, created_at).
+- Data access goes through DAO classes (`CustomerDao`, `AccountDao`, `TransactionDao`); `Bank` delegates to them. `Account.deposit`/`withdraw` sync the new balance to the DB via `AccountDao.updateBalance`. Each `Transaction.execute` logs a row via `TransactionDao` (withdraw/transfer only on success).
+- Inspect the DB without IntelliJ Ultimate (works in free Community too) via the bundled H2 Console:
+  ```bash
+  # Web console at http://localhost:8082 (URL above, user "sa", empty password)
+  java -cp "lib/*" org.h2.tools.Console
+  # Or a one-off query from the shell:
+  java -cp "lib/*" org.h2.tools.Shell -url "jdbc:h2:./data/bank;AUTO_SERVER=TRUE" -user sa -password "" -sql "SELECT * FROM transactions"
+  ```
 
 ## Architecture
 

@@ -5,15 +5,18 @@ public class Main {
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
+
+        // H2 데이터베이스 초기화 (테이블 생성)
+        Database.init();
+
         Bank bank = new Bank();
 
         Customer loginCustomer = null;
-        Customer registeredCustomer = null;
         boolean isLoggedIn = false;
         Account myAccount = null;
 
-        // 시연용 가상 송금 대상 계좌 (계좌번호: 200-5678, 초기잔액: 50000원)
-        Account targetAccount = new Account("200-5678", 50000, "5678");
+        // 시연용 가상 송금 대상 계좌 (계좌번호: 200-5678) — DB에 시드/복원
+        Account targetAccount = bank.ensureTargetAccount();
 
         boolean isRunning = true;
 
@@ -66,16 +69,19 @@ public class Main {
                             System.out.print(" -> 인증할 비밀번호 입력: ");
                             String inputPwd = scanner.nextLine();
 
-                            boolean success = bank.authenticateUser(inputId, inputPwd);
+                            Customer authed = bank.authenticateUser(inputId, inputPwd);
 
-                            if (success) {
-                                if (registeredCustomer != null && registeredCustomer.getCustomerId().equals(inputId)) {
-                                    loginCustomer = registeredCustomer;
-                                    isLoggedIn = true;
-                                    System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
-                                } else {
-                                    System.out.println("중단: 가입 기록은 확인되나 회원 데이터 객체 매핑에 실패했습니다.");
+                            if (authed != null) {
+                                loginCustomer = authed;
+                                isLoggedIn = true;
+                                // 재실행 시 DB에 보관된 계좌를 복원
+                                myAccount = bank.loadAccount(authed);
+                                if (myAccount != null) {
+                                    System.out.println(">> 기존 계좌를 불러왔습니다. [계좌번호: "
+                                            + myAccount.getAccountNumber() + ", 잔액: "
+                                            + myAccount.getBalance() + "원]");
                                 }
+                                System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
                             } else {
                                 isLoggedIn = false;
                                 System.out.println(">> [안내] 메인 메뉴로 돌아갑니다.");
@@ -93,8 +99,8 @@ public class Main {
                             System.out.print(" -> 생성할 사용자 비밀번호 입력: ");
                             String pwd = scanner.nextLine();
 
-                            registeredCustomer = new Customer(id, pwd, name, ssn);
-                            bank.registerCustomer(registeredCustomer);
+                            Customer newCustomer = new Customer(id, pwd, name, ssn);
+                            bank.registerCustomer(newCustomer);
                             System.out.println(">> 회원가입이 완료되었습니다.");
 
                             System.out.println("\n==================================================");
@@ -105,14 +111,12 @@ public class Main {
                             System.out.print(" -> 로그인할 비밀번호 입력: ");
                             String autoPwd = scanner.nextLine();
 
-                            boolean autoSuccess = bank.authenticateUser(autoId, autoPwd);
+                            Customer autoAuthed = bank.authenticateUser(autoId, autoPwd);
 
-                            if (autoSuccess) {
-                                if (registeredCustomer != null && registeredCustomer.getCustomerId().equals(autoId)) {
-                                    loginCustomer = registeredCustomer;
-                                    isLoggedIn = true;
-                                    System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
-                                }
+                            if (autoAuthed != null) {
+                                loginCustomer = autoAuthed;
+                                isLoggedIn = true;
+                                System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
                             } else {
                                 loginCustomer = null;
                                 isLoggedIn = false;
@@ -226,7 +230,28 @@ public class Main {
                         System.out.println("오류: 계좌가 없습니다.");
                         break;
                     }
-                    System.out.println(" -> [안내] 가상의 송금 대상 정보가 자동 세팅됩니다. (계좌번호: 200-5678)");
+
+                    System.out.print(" -> 송금 대상 계좌번호 입력 (엔터 시 기본값 200-5678): ");
+                    String targetInput = scanner.nextLine().trim();
+
+                    Account recipient;
+                    if (targetInput.isEmpty() || targetInput.equals("200-5678")) {
+                        // 아무것도 입력하지 않으면 가상 송금 대상(200-5678) 자동 세팅
+                        recipient = targetAccount;
+                        System.out.println(" -> [안내] 기본 가상 계좌(200-5678)로 송금합니다.");
+                    } else {
+                        recipient = bank.findAccount(targetInput);
+                        if (recipient == null) {
+                            System.out.println(">> [오류] 존재하지 않는 계좌번호입니다: " + targetInput);
+                            break;
+                        }
+                        if (recipient.getAccountNumber().equals(myAccount.getAccountNumber())) {
+                            System.out.println(">> [오류] 본인 계좌로는 송금할 수 없습니다.");
+                            break;
+                        }
+                        System.out.println(" -> [안내] 대상 계좌 확인 완료. (계좌번호: " + recipient.getAccountNumber() + ")");
+                    }
+
                     System.out.print(" -> 송금(이체)할 금액 입력(원): ");
                     double transAmount;
                     try {
@@ -242,7 +267,7 @@ public class Main {
                         break;
                     }
 
-                    myAccount.performTransaction(new TransferTransaction(transAmount, targetAccount));
+                    myAccount.performTransaction(new TransferTransaction(transAmount, recipient));
                     System.out.println("   현재 잔액 : " + myAccount.getBalance() + "원");
                     break;
 
@@ -261,6 +286,7 @@ public class Main {
 
                 case 8:
                     System.out.println("\n>> 은행 전산 프로그램 시연을 종료합니다. 발표를 마치겠습니다.");
+                    Database.close();
                     isRunning = false;
                     break;
 

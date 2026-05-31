@@ -4,6 +4,7 @@ class TransferTransaction
 
     private double amount;
     private Account targetAccount;
+    private static final TransactionDao transactionDao = new TransactionDao();
 
     public TransferTransaction(
             double amount,
@@ -16,18 +17,19 @@ class TransferTransaction
     @Override
     public void execute(Account account) {
 
-        if (account.getBalance() >= amount) {
-
-            account.withdraw(amount);
+        // 출금이 성공해야 송금 진행 (잔액 부족 시 withdraw가 false 반환 + 메시지 출력)
+        if (account.withdraw(amount)) {
 
             targetAccount.deposit(amount);
 
-            System.out.println("송금 완료");
-        }
-        else {
+            // 거래내역 기록 (대상 계좌 포함)
+            transactionDao.insert(
+                    account.getAccountNumber(),
+                    "TRANSFER",
+                    amount,
+                    targetAccount.getAccountNumber());
 
-            System.out.println(
-                    ">> [오류] 송금 실패 : 잔액 부족 (현재 잔액 : " + account.getBalance() + "원)");
+            System.out.println("송금 완료");
         }
     }
 }

@@ -38,6 +38,10 @@ class Customer {
         return name;
     }
 
+    public String getSsn() {
+        return ssn;
+    }
+
     // 계좌 보유
     public void addAccount(Account account) {
         accounts.add(account);
