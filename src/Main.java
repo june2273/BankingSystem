@@ -1,3 +1,4 @@
+import java.util.InputMismatchException;
 import java.util.Scanner;
 
 public class Main {
@@ -7,6 +8,8 @@ public class Main {
         Bank bank = new Bank();
 
         Customer loginCustomer = null;
+        Customer registeredCustomer = null;
+        boolean isLoggedIn = false;
         Account myAccount = null;
 
         // 시연용 가상 송금 대상 계좌 (계좌번호: 200-5678, 초기잔액: 50000원)
@@ -27,21 +30,34 @@ public class Main {
             System.out.println("==================================================");
             System.out.print(">> 원하시는 항목 번호를 선택하세요: ");
 
-            int choice = scanner.nextInt();
-            scanner.nextLine();
+            int choice;
+            try {
+                choice = scanner.nextInt();
+                scanner.nextLine();
+            } catch (InputMismatchException e) {
+                System.out.println(">> [오류] 숫자를 입력해주세요.");
+                scanner.nextLine(); // 잘못된 입력 버퍼 비우기
+                continue;
+            }
 
             switch (choice) {
                 case 1:
-                    // 1번을 누르면 내부에서 또 다른 서브 메뉴판 출력
                     System.out.println("\n==================================================");
                     System.out.println("  1. 로그인");
                     System.out.println("  2. 회원가입");
                     System.out.println("==================================================");
                     System.out.print(">> 번호를 선택하세요: ");
-                    int subChoice = scanner.nextInt();
-                    scanner.nextLine(); // 버퍼 비우기
 
-                    // 🌟 퀴즈 및 가독성을 위해 서브 메뉴도 switch-case문으로 전환했습니다.
+                    int subChoice;
+                    try {
+                        subChoice = scanner.nextInt();
+                        scanner.nextLine();
+                    } catch (InputMismatchException e) {
+                        System.out.println(">> [오류] 숫자를 입력해주세요.");
+                        scanner.nextLine();
+                        break;
+                    }
+
                     switch (subChoice) {
                         case 1: // 1. 로그인 선택 시
                             System.out.println("\n[1-1] 사용자 로그인 인증");
@@ -50,15 +66,18 @@ public class Main {
                             System.out.print(" -> 인증할 비밀번호 입력: ");
                             String inputPwd = scanner.nextLine();
 
-                            // 은행 내부 검증 시스템 작동 (authenticateUser)
                             boolean success = bank.authenticateUser(inputId, inputPwd);
 
                             if (success) {
-                                // 회원가입할 때 참조해둔 유저 인스턴스가 있다면 로그인 세션으로 연결
-                                if (loginCustomer != null && loginCustomer.getCustomerId().equals(inputId)) {
+                                if (registeredCustomer != null && registeredCustomer.getCustomerId().equals(inputId)) {
+                                    loginCustomer = registeredCustomer;
+                                    isLoggedIn = true;
                                     System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
+                                } else {
+                                    System.out.println("중단: 가입 기록은 확인되나 회원 데이터 객체 매핑에 실패했습니다.");
                                 }
                             } else {
+                                isLoggedIn = false;
                                 System.out.println(">> [안내] 메인 메뉴로 돌아갑니다.");
                             }
                             break;
@@ -74,18 +93,38 @@ public class Main {
                             System.out.print(" -> 생성할 사용자 비밀번호 입력: ");
                             String pwd = scanner.nextLine();
 
-                            // 가입 절차: 고객 객체를 생성하고 은행 리스트에 등록 (UML: registerCustomer)
-                            loginCustomer = new Customer(id, pwd, name, ssn);
-                            bank.registerCustomer(loginCustomer);
-                            System.out.println(">> 회원가입이 완료되었습니다. 이제 1번 로그인을 진행해 주세요.");
+                            registeredCustomer = new Customer(id, pwd, name, ssn);
+                            bank.registerCustomer(registeredCustomer);
+                            System.out.println(">> 회원가입이 완료되었습니다.");
+
+                            System.out.println("\n==================================================");
+                            System.out.println("   가입 승인에 따라 실시간 로그인 인증을 연이어 진행합니다.");
+                            System.out.println("==================================================");
+                            System.out.print(" -> 로그인할 아이디 입력: ");
+                            String autoId = scanner.nextLine();
+                            System.out.print(" -> 로그인할 비밀번호 입력: ");
+                            String autoPwd = scanner.nextLine();
+
+                            boolean autoSuccess = bank.authenticateUser(autoId, autoPwd);
+
+                            if (autoSuccess) {
+                                if (registeredCustomer != null && registeredCustomer.getCustomerId().equals(autoId)) {
+                                    loginCustomer = registeredCustomer;
+                                    isLoggedIn = true;
+                                    System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
+                                }
+                            } else {
+                                loginCustomer = null;
+                                isLoggedIn = false;
+                                System.out.println("주의: 가입 완료 후 로그인 시도에 실패했습니다. 메인 메뉴에서 재인증이 필요합니다.");
+                            }
                             break;
 
-                        default: // 1, 2 외의 잘못된 번호 입력 시
+                        default:
                             System.out.println("잘못된 선택입니다. 서브 메뉴를 종료하고 메인으로 돌아갑니다.");
                             break;
                     }
-                    break; // 메인 switch문의 case 1을 탈출
-
+                    break;
 
                 case 2:
                     System.out.println("\n[2] 신규 계좌 개설 세션");
@@ -94,12 +133,22 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 최초로 예치할 금액 입력(원): ");
-                    double initialBalance = scanner.nextDouble();
-                    scanner.nextLine();
+                    double initialBalance;
+                    try {
+                        initialBalance = scanner.nextDouble();
+                        scanner.nextLine();
+                    } catch (InputMismatchException e) {
+                        System.out.println(">> [오류] 숫자를 입력해주세요.");
+                        scanner.nextLine();
+                        break;
+                    }
+                    if (initialBalance < 0) {
+                        System.out.println(">> [오류] 초기 예치금은 0원 이상이어야 합니다.");
+                        break;
+                    }
                     System.out.print(" -> 설정할 계좌 비밀번호 4자리 입력: ");
                     String accountPassword = scanner.nextLine();
 
-                    // 시퀀스 다이어그램 흐름: 고객 -> 은행 -> 계좌 생성 -> 고객에게 반환
                     myAccount = loginCustomer.openAccount(bank, initialBalance, accountPassword);
                     break;
 
@@ -128,7 +177,19 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 입금할 금액 입력(원): ");
-                    double depAmount = scanner.nextDouble();
+                    double depAmount;
+                    try {
+                        depAmount = scanner.nextDouble();
+                        scanner.nextLine();
+                    } catch (InputMismatchException e) {
+                        System.out.println(">> [오류] 숫자를 입력해주세요.");
+                        scanner.nextLine();
+                        break;
+                    }
+                    if (depAmount <= 0) {
+                        System.out.println(">> [오류] 입금액은 0원보다 커야 합니다.");
+                        break;
+                    }
 
                     myAccount.performTransaction(new DepositTransaction(depAmount));
                     System.out.println("   현재 잔액 : " + myAccount.getBalance() + "원");
@@ -141,7 +202,19 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 출금할 금액 입력(원): ");
-                    double withAmount = scanner.nextDouble();
+                    double withAmount;
+                    try {
+                        withAmount = scanner.nextDouble();
+                        scanner.nextLine();
+                    } catch (InputMismatchException e) {
+                        System.out.println(">> [오류] 숫자를 입력해주세요.");
+                        scanner.nextLine();
+                        break;
+                    }
+                    if (withAmount <= 0) {
+                        System.out.println(">> [오류] 출금액은 0원보다 커야 합니다.");
+                        break;
+                    }
 
                     myAccount.performTransaction(new WithdrawalTransaction(withAmount));
                     System.out.println("   현재 잔액 : " + myAccount.getBalance() + "원");
@@ -155,7 +228,19 @@ public class Main {
                     }
                     System.out.println(" -> [안내] 가상의 송금 대상 정보가 자동 세팅됩니다. (계좌번호: 200-5678)");
                     System.out.print(" -> 송금(이체)할 금액 입력(원): ");
-                    double transAmount = scanner.nextDouble();
+                    double transAmount;
+                    try {
+                        transAmount = scanner.nextDouble();
+                        scanner.nextLine();
+                    } catch (InputMismatchException e) {
+                        System.out.println(">> [오류] 숫자를 입력해주세요.");
+                        scanner.nextLine();
+                        break;
+                    }
+                    if (transAmount <= 0) {
+                        System.out.println(">> [오류] 송금액은 0원보다 커야 합니다.");
+                        break;
+                    }
 
                     myAccount.performTransaction(new TransferTransaction(transAmount, targetAccount));
                     System.out.println("   현재 잔액 : " + myAccount.getBalance() + "원");
