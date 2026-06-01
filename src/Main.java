@@ -94,8 +94,29 @@ public class Main {
                             String name = scanner.nextLine();
                             System.out.print(" -> 주민등록번호 입력: ");
                             String ssn = scanner.nextLine();
-                            System.out.print(" -> 생성할 사용자 ID 입력: ");
-                            String id = scanner.nextLine();
+
+                            // 동일 주민등록번호가 이미 가입돼 있으면 가입 차단 (1인 1가입)
+                            if (bank.isSsnRegistered(ssn)) {
+                                System.out.println(">> [오류] 이미 가입된 회원입니다. (동일 주민등록번호 존재)");
+                                break;
+                            }
+
+                            // 중복되지 않는 아이디를 받을 때까지 반복 입력
+                            String id;
+                            while (true) {
+                                System.out.print(" -> 생성할 사용자 ID 입력: ");
+                                id = scanner.nextLine().trim();
+                                if (id.isEmpty()) {
+                                    System.out.println(">> [오류] 아이디는 비워둘 수 없습니다. 다시 입력해주세요.");
+                                    continue;
+                                }
+                                if (bank.isIdTaken(id)) {
+                                    System.out.println(">> [오류] 중복된 ID입니다. 다시 입력해주세요.");
+                                    continue;
+                                }
+                                break;
+                            }
+
                             System.out.print(" -> 생성할 사용자 비밀번호 입력: ");
                             String pwd = scanner.nextLine();
 
@@ -132,8 +153,17 @@ public class Main {
 
                 case 2:
                     System.out.println("\n[2] 신규 계좌 개설 세션");
-                    if (loginCustomer == null) {
+                    // 회원가입만 정상 수행하고 로그인을 제쳤을 때 발생하는 전산 우회를 원천 차단
+                    if (!isLoggedIn) {
                         System.out.println("오류: 1번 항목을 통해 가입 및 로그인을 먼저 완료해주세요.");
+                        break;
+                    }
+                    // 이미 계좌를 보유한 고객은 중복 개설 차단 (DB 기준 — 재실행 후에도 유효)
+                    if (bank.hasAccount(loginCustomer)) {
+                        System.out.println("이미 계좌가 존재합니다. (한 고객당 1개 계좌만 개설할 수 있습니다.)");
+                        if (myAccount == null) {
+                            myAccount = bank.loadAccount(loginCustomer);
+                        }
                         break;
                     }
                     System.out.print(" -> 최초로 예치할 금액 입력(원): ");
@@ -280,8 +310,18 @@ public class Main {
                     System.out.println("[" + loginCustomer.getName() + " 고객님의 현재 전산 계좌 명세]");
                     bank.viewAccount(myAccount);
 
-                    System.out.println("\n[송금 상대방 계좌 명세]");
-                    targetAccount.printInfo();
+                    System.out.println("\n[최근 거래내역 (최대 3건)]");
+                    java.util.List<String> history =
+                            bank.recentTransactions(myAccount.getAccountNumber(), 3);
+                    if (history.isEmpty()) {
+                        System.out.println("   거래내역이 없습니다.");
+                    } else {
+                        int no = 1;
+                        for (String record : history) {
+                            System.out.println("   " + no + ". " + record);
+                            no++;
+                        }
+                    }
                     break;
 
                 case 8:

@@ -3,6 +3,7 @@ class Bank {
 
     private final CustomerDao customerDao = new CustomerDao();
     private final AccountDao accountDao = new AccountDao();
+    private final TransactionDao transactionDao = new TransactionDao();
 
     // UML : 사용자인증 — 성공 시 Customer 반환, 실패 시 null
     public Customer authenticateUser(String customerId, String password) {
@@ -23,6 +24,16 @@ class Bank {
         }
         customerDao.insert(customer);
         System.out.println("   (System) -> 은행 전산망(DB)에 고객 정보가 등록되었습니다.");
+    }
+
+    // 회원가입 중복 검사 — 동일 주민등록번호로 이미 가입된 회원이 있는지
+    public boolean isSsnRegistered(String ssn) {
+        return customerDao.existsBySsn(ssn);
+    }
+
+    // 회원가입 중복 검사 — 이미 사용 중인 아이디인지
+    public boolean isIdTaken(String customerId) {
+        return customerDao.exists(customerId);
     }
 
     // UML : 고객조회
@@ -59,9 +70,19 @@ class Bank {
         return accountDao.findFirstByCustomer(customer.getCustomerId());
     }
 
+    // 고객이 이미 계좌를 보유했는지 (중복 개설 차단용) — DB 기준
+    public boolean hasAccount(Customer customer) {
+        return accountDao.existsByCustomer(customer.getCustomerId());
+    }
+
     // 계좌번호로 계좌 조회 (송금 대상 확인용) — 없으면 null
     public Account findAccount(String accountNumber) {
         return accountDao.findByNumber(accountNumber);
+    }
+
+    // 계좌의 최근 거래내역 limit건 조회 (계좌 정보 최종 조회용)
+    public java.util.List<String> recentTransactions(String accountNumber, int limit) {
+        return transactionDao.findRecentByAccount(accountNumber, limit);
     }
 
     // 시연용 송금 대상 계좌(200-5678)를 DB에 1회 시드. system 고객을 소유자로 사용.
