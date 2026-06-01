@@ -36,7 +36,7 @@ class Bank {
     }
 
     // UML : 계좌생성 — 계좌번호는 DB 기준 보유 계좌 수로 생성
-    public Account openAccount(Customer customer, double initialBalance, String accountPassword) {
+    public Account openAccount(Customer customer, long initialBalance, String accountPassword) {
         String accountNumber = "100-" + (1000 + repo.countMainAccounts());
         Account account = new Account(accountNumber, initialBalance, accountPassword);
         repo.insertAccount(account, customer.getCustomerId());
@@ -70,52 +70,67 @@ class Bank {
 
     // ===== 거래 (PIN 검증 게이트 내장 → 전략 실행 → 성공 시에만 영속화) =====
 
-    public TransactionResult deposit(Account account, String pin, double amount) {
-        if (!verifyAccountPassword(account, pin)) {
+    // 공통 거래 골격(합성으로 구현한 템플릿 메소드). 변하지 않는 뼈대(①PIN검증 ②금액검증 ③전략실행
+    // ④영속화)는 여기 고정하고, 달라지는 단계(전략·영속 대상·기록)만 인자로 위임받는다.
+    //   · 세 거래의 검증 로직 중복을 제거하고, ④ 영속화를 runInTransaction으로 감싸 원자성을 보장한다.
+    private TransactionResult settle(Account source, String pin, long amount,
+                                     Transaction strategy,
+                                     List<Account> affected,
+                                     TransactionRecord record) {
+        if (!verifyAccountPassword(source, pin)) {       // ① 공통 — PIN 검증 게이트
             return TransactionResult.WRONG_PIN;
         }
-        if (amount <= 0) {
+        if (amount <= 0) {                               // ② 공통 — 금액 검증
             return TransactionResult.INVALID_AMOUNT;
         }
-        account.performTransaction(new DepositTransaction(amount));
-        repo.updateBalance(account);
-        repo.insertHistory(new TransactionRecord(account.getAccountNumber(), "DEPOSIT", amount, null));
-        return TransactionResult.SUCCESS;
-    }
-
-    public TransactionResult withdraw(Account account, String pin, double amount) {
-        if (!verifyAccountPassword(account, pin)) {
-            return TransactionResult.WRONG_PIN;
-        }
-        if (amount <= 0) {
-            return TransactionResult.INVALID_AMOUNT;
-        }
-        if (!account.performTransaction(new WithdrawTransaction(amount))) {
+        if (!source.performTransaction(strategy)) {      // ③ 가변 — 도메인 전략 실행
             return TransactionResult.INSUFFICIENT_FUNDS;
         }
-        repo.updateBalance(account);
-        repo.insertHistory(new TransactionRecord(account.getAccountNumber(), "WITHDRAW", amount, null));
+        repo.runInTransaction(() -> {                    // ④ 성공 시에만 — 원자적 영속화
+            for (Account a : affected) {
+                repo.updateBalance(a);
+            }
+            repo.insertHistory(record);
+        });
         return TransactionResult.SUCCESS;
     }
 
-    public TransactionResult transfer(Account source, String pin, String targetNo, double amount) {
-        if (!verifyAccountPassword(source, pin)) {
-            return TransactionResult.WRONG_PIN;
-        }
-        if (amount <= 0) {
-            return TransactionResult.INVALID_AMOUNT;
+    public TransactionResult deposit(Account account, String pin, long amount) {
+        return settle(account, pin, amount,
+                new DepositTransaction(amount),
+                List.of(account),
+                new TransactionRecord(account.getAccountNumber(), "DEPOSIT", amount, null));
+    }
+
+    public TransactionResult withdraw(Account account, String pin, long amount) {
+        return settle(account, pin, amount,
+                new WithdrawTransaction(amount),
+                List.of(account),
+                new TransactionRecord(account.getAccountNumber(), "WITHDRAW", amount, null));
+    }
+
+    // 대상을 계좌번호로 받는 송금 — 대상 조회 후 객체 버전에 위임
+    public TransactionResult transfer(Account source, String pin, String targetNo, long amount) {
+        if (targetNo.equals(source.getAccountNumber())) {   // P2 불변식 — 자기송금 금지(서비스에서 강제)
+            return TransactionResult.SELF_TRANSFER;
         }
         Account target = repo.findAccount(targetNo);
         if (target == null) {
             return TransactionResult.ACCOUNT_NOT_FOUND;
         }
-        if (!source.performTransaction(new TransferTransaction(amount, target))) {
-            return TransactionResult.INSUFFICIENT_FUNDS;
+        return transfer(source, pin, target, amount);
+    }
+
+    // 메서드 오버로딩 — 호출부가 이미 대상 Account를 들고 있을 때 조회를 생략
+    public TransactionResult transfer(Account source, String pin, Account target, long amount) {
+        if (target.getAccountNumber().equals(source.getAccountNumber())) {  // P2 불변식 — 자기송금 금지
+            return TransactionResult.SELF_TRANSFER;
         }
-        repo.updateBalance(source);
-        repo.updateBalance(target);
-        repo.insertHistory(new TransactionRecord(source.getAccountNumber(), "TRANSFER", amount, targetNo));
-        return TransactionResult.SUCCESS;
+        return settle(source, pin, amount,
+                new TransferTransaction(amount, target),
+                List.of(source, target),                    // 출금·입금 계좌를 한 트랜잭션에서 함께 갱신
+                new TransactionRecord(source.getAccountNumber(), "TRANSFER", amount,
+                        target.getAccountNumber()));
     }
 
     // 시연용 가상 송금 대상 계좌(200-5678)를 DB에 1회 시드. system 고객을 소유자로 사용.

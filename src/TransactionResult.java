@@ -4,5 +4,6 @@ public enum TransactionResult {
     WRONG_PIN,           // 계좌 비밀번호 불일치 (PIN 검증 게이트 실패)
     INSUFFICIENT_FUNDS,  // 잔액 부족 (출금/송금)
     INVALID_AMOUNT,      // 금액이 0 이하 등 유효하지 않음
-    ACCOUNT_NOT_FOUND    // 송금 대상 계좌가 존재하지 않음
+    ACCOUNT_NOT_FOUND,   // 송금 대상 계좌가 존재하지 않음
+    SELF_TRANSFER        // 본인 계좌로의 송금 (도메인 불변식 위반)
 }

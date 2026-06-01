@@ -4,17 +4,17 @@ class TransactionRecord {
 
     private final String accountNo;       // 거래를 수행한 계좌
     private final String type;            // DEPOSIT | WITHDRAW | TRANSFER
-    private final double amount;
+    private final long amount;            // 원 단위 정수
     private final String targetAccountNo; // 송금 대상 (입·출금은 null)
     private final String createdAt;       // 조회 시 DB에서 채움 (기록 시에는 null)
 
     // 기록용 — created_at은 DB가 CURRENT_TIMESTAMP로 채움
-    TransactionRecord(String accountNo, String type, double amount, String targetAccountNo) {
+    TransactionRecord(String accountNo, String type, long amount, String targetAccountNo) {
         this(accountNo, type, amount, targetAccountNo, null);
     }
 
     // 조회용 — DB에서 읽은 created_at 포함
-    TransactionRecord(String accountNo, String type, double amount,
+    TransactionRecord(String accountNo, String type, long amount,
                       String targetAccountNo, String createdAt) {
         this.accountNo = accountNo;
         this.type = type;
@@ -25,7 +25,7 @@ class TransactionRecord {
 
     String getAccountNo()       { return accountNo; }
     String getType()            { return type; }
-    double getAmount()          { return amount; }
+    long getAmount()            { return amount; }
     String getTargetAccountNo() { return targetAccountNo; }
     String getCreatedAt()       { return createdAt; }
 
@@ -39,8 +39,9 @@ class TransactionRecord {
         };
     }
 
-    // 거래내역 한 줄 표현 — "[시각] 라벨 금액원 → 대상"
-    String format() {
+    // Object.toString() 재정의 — 거래내역 한 줄 표현 "[시각] 라벨 금액원 → 대상"
+    @Override
+    public String toString() {
         String line = "[" + createdAt + "] " + label() + " " + amount + "원";
         if (targetAccountNo != null) {
             line += " → " + targetAccountNo;

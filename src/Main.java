@@ -10,8 +10,8 @@ public class Main {
         // H2 데이터베이스 초기화 (테이블 생성)
         Database.init();
 
-        // 서비스(은행) ← 영속(BankRepository) 주입
-        Bank bank = new Bank(new BankRepository());
+        // 서비스(은행) ← 영속(BankRepository 인터페이스의 H2 구현체) 주입 (DIP)
+        Bank bank = new Bank(new H2BankRepository());
 
         Customer loginCustomer = null;
         boolean isLoggedIn = false;
@@ -86,6 +86,10 @@ public class Main {
                                 }
                                 System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
                             } else {
+                                // 로그인 실패 시 이전 세션 상태를 모두 초기화
+                                // (myAccount가 남아 있으면 로그아웃 후에도 거래 메뉴가 동작하는 허점이 생김)
+                                loginCustomer = null;
+                                myAccount = null;
                                 isLoggedIn = false;
                                 System.out.println(">> [인증 결과] 로그인 실패 : 아이디 또는 비밀번호가 틀렸습니다.");
                                 System.out.println(">> [안내] 메인 메뉴로 돌아갑니다.");
@@ -141,9 +145,13 @@ public class Main {
                                 System.out.println(">> [인증 결과] 로그인 성공! [" + autoAuthed.getName() + "]님 환영합니다.");
                                 loginCustomer = autoAuthed;
                                 isLoggedIn = true;
+                                // 새 계정으로 세션 전환 — 이전 사용자의 계좌가 남지 않도록 갱신
+                                // (신규 가입자는 계좌가 없으므로 null이 되어, 엉뚱한 계좌로 거래되는 것을 차단)
+                                myAccount = bank.loadAccount(autoAuthed);
                                 System.out.println(">> 유저 세션 연결 완료. 계좌 개설 및 거래가 가능합니다.");
                             } else {
                                 loginCustomer = null;
+                                myAccount = null;
                                 isLoggedIn = false;
                                 System.out.println("주의: 가입 완료 후 로그인 시도에 실패했습니다. 메인 메뉴에서 재인증이 필요합니다.");
                             }
@@ -171,9 +179,9 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 최초로 예치할 금액 입력(원): ");
-                    double initialBalance;
+                    long initialBalance;
                     try {
-                        initialBalance = scanner.nextDouble();
+                        initialBalance = scanner.nextLong();
                         scanner.nextLine();
                     } catch (InputMismatchException e) {
                         System.out.println(">> [오류] 숫자를 입력해주세요.");
@@ -218,9 +226,9 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 입금할 금액 입력(원): ");
-                    double depAmount;
+                    long depAmount;
                     try {
-                        depAmount = scanner.nextDouble();
+                        depAmount = scanner.nextLong();
                         scanner.nextLine();
                     } catch (InputMismatchException e) {
                         System.out.println(">> [오류] 숫자를 입력해주세요.");
@@ -240,9 +248,9 @@ public class Main {
                         break;
                     }
                     System.out.print(" -> 출금할 금액 입력(원): ");
-                    double withAmount;
+                    long withAmount;
                     try {
-                        withAmount = scanner.nextDouble();
+                        withAmount = scanner.nextLong();
                         scanner.nextLine();
                     } catch (InputMismatchException e) {
                         System.out.println(">> [오류] 숫자를 입력해주세요.");
@@ -272,9 +280,9 @@ public class Main {
                     }
 
                     System.out.print(" -> 송금(이체)할 금액 입력(원): ");
-                    double transAmount;
+                    long transAmount;
                     try {
-                        transAmount = scanner.nextDouble();
+                        transAmount = scanner.nextLong();
                         scanner.nextLine();
                     } catch (InputMismatchException e) {
                         System.out.println(">> [오류] 숫자를 입력해주세요.");
@@ -294,8 +302,7 @@ public class Main {
                         break;
                     }
                     System.out.println("[" + loginCustomer.getName() + " 고객님의 현재 전산 계좌 명세]");
-                    System.out.println("계좌번호 : " + myAccount.getAccountNumber());
-                    System.out.println("잔액 : " + myAccount.getBalance());
+                    System.out.println(myAccount); // Account.toString() — 다형적 출력
 
                     System.out.println("\n[최근 거래내역 (최대 3건)]");
                     List<TransactionRecord> history = bank.recentHistory(myAccount.getAccountNumber(), 3);
@@ -304,7 +311,7 @@ public class Main {
                     } else {
                         int no = 1;
                         for (TransactionRecord record : history) {
-                            System.out.println("   " + no + ". " + record.format());
+                            System.out.println("   " + no + ". " + record); // TransactionRecord.toString()
                             no++;
                         }
                     }
@@ -339,6 +346,8 @@ public class Main {
                     System.out.println(">> [오류] 금액은 0원보다 커야 합니다.");
             case ACCOUNT_NOT_FOUND ->
                     System.out.println(">> [오류] 존재하지 않는 계좌번호입니다.");
+            case SELF_TRANSFER ->
+                    System.out.println(">> [오류] 본인 계좌로는 송금할 수 없습니다.");
         }
     }
 }

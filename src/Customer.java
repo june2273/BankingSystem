@@ -34,7 +34,7 @@ class Customer {
     }
 
     // UML : 계좌개설(은행) — 은행에 위임하여 생성된 계좌를 반환
-    public Account openAccount(Bank bank, double initialBalance, String accountPassword) {
+    public Account openAccount(Bank bank, long initialBalance, String accountPassword) {
         return bank.openAccount(this, initialBalance, accountPassword);
     }
 }

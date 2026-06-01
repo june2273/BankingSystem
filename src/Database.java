@@ -38,10 +38,10 @@ class Database {
 
         String createAccounts = """
                 CREATE TABLE IF NOT EXISTS accounts (
-                    account_number   VARCHAR(20)   PRIMARY KEY,
-                    customer_id      VARCHAR(50)   NOT NULL,
-                    balance          DECIMAL(15,2) NOT NULL DEFAULT 0,
-                    account_password VARCHAR(20)   NOT NULL,
+                    account_number   VARCHAR(20) PRIMARY KEY,
+                    customer_id      VARCHAR(50) NOT NULL,
+                    balance          BIGINT      NOT NULL DEFAULT 0,
+                    account_password VARCHAR(20) NOT NULL,
                     FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
                 )
                 """;
@@ -49,11 +49,11 @@ class Database {
         String createTransactions = """
                 CREATE TABLE IF NOT EXISTS transactions (
                     id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    account_number VARCHAR(20)   NOT NULL,
-                    type           VARCHAR(10)   NOT NULL,
-                    amount         DECIMAL(15,2) NOT NULL,
+                    account_number VARCHAR(20) NOT NULL,
+                    type           VARCHAR(10) NOT NULL,
+                    amount         BIGINT      NOT NULL,
                     target_account VARCHAR(20),
-                    created_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+                    created_at     TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
                 )
                 """;
 
