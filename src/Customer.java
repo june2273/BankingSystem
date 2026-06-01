@@ -1,17 +1,10 @@
-// 고객 클래스
-
-import java.util.ArrayList;
-import java.util.List;
-
+// 고객 클래스 — 순수 도메인(식별 정보 보유). 계좌 목록은 DB가 진실의 원천이므로 메모리에 두지 않음.
 class Customer {
 
     private String customerId;
     private String password;
     private String name;
     private String ssn;
-
-    // 고객은 여러 계좌를 가질 수 있음
-    private ArrayList<Account> accounts;
 
     public Customer(String customerId,
                     String password,
@@ -22,8 +15,6 @@ class Customer {
         this.password = password;
         this.name = name;
         this.ssn = ssn;
-
-        accounts = new ArrayList<>();
     }
 
     public String getCustomerId() {
@@ -42,17 +33,8 @@ class Customer {
         return ssn;
     }
 
-    // 계좌 보유
-    public void addAccount(Account account) {
-        accounts.add(account);
-    }
-
-    public ArrayList<Account> getAccounts() {
-        return accounts;
-    }
-
-    // UML : 계좌개설(은행) — 시퀀스: 은행이 계좌 정보를 반환
+    // UML : 계좌개설(은행) — 은행에 위임하여 생성된 계좌를 반환
     public Account openAccount(Bank bank, double initialBalance, String accountPassword) {
-        return bank.createAccount(this, initialBalance, accountPassword);
+        return bank.openAccount(this, initialBalance, accountPassword);
     }
 }

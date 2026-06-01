@@ -1,20 +1,15 @@
-// 입금 거래
-class DepositTransaction
-        implements Transaction {
+// 입금 거래 — 순수 도메인 연산 (DB 기록·출력은 Bank가 담당)
+class DepositTransaction implements Transaction {
 
     private double amount;
-    private static final TransactionDao transactionDao = new TransactionDao();
 
     public DepositTransaction(double amount) {
         this.amount = amount;
     }
 
     @Override
-    public void execute(Account account) {
-
+    public boolean execute(Account account) {
         account.deposit(amount);
-
-        // 거래내역 기록 (입금은 대상 계좌 없음)
-        transactionDao.insert(account.getAccountNumber(), "DEPOSIT", amount, null);
+        return true; // 입금은 항상 성공
     }
 }

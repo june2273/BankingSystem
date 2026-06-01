@@ -1,12 +1,11 @@
-// 계좌 클래스
+// 계좌 클래스 — 순수 도메인. DB 영속화/콘솔 출력은 가지지 않는다(SRP).
+//   · 잔액 변경은 상태만 바꾸고, DB 반영은 서비스(Bank)가 BankRepository로 수행.
+//   · 입금/출금은 거래 전략을 통해서만 호출(거래수행) — 패키지 전용 가시성.
 class Account {
 
     private String accountNumber;
     private double balance;
     private String accountPassword;
-
-    // 잔액 변경을 DB에 동기화하기 위한 DAO (모든 계좌가 공유)
-    private static final AccountDao accountDao = new AccountDao();
 
     public Account(String accountNumber,
                    double initialBalance,
@@ -17,7 +16,7 @@ class Account {
         this.accountPassword = accountPassword;
     }
 
-    // UML : 계좌인증
+    // UML : 계좌인증 — 거래 전 PIN 검증 게이트에서 재사용
     public boolean authenticateAccount(
             String accountNumber,
             String accountPassword) {
@@ -26,41 +25,23 @@ class Account {
                 && this.accountPassword.equals(accountPassword);
     }
 
-    // UML : 거래수행
-    public void performTransaction(
-            Transaction transaction) {
-
-        transaction.execute(this);
+    // UML : 거래수행 — 전략 실행 결과(성공 여부)를 그대로 반환
+    public boolean performTransaction(Transaction transaction) {
+        return transaction.execute(this);
     }
 
-    // UML : 입금
+    // UML : 입금 — 잔액만 증가(순수). DB 반영은 호출 측(Bank)이 수행
     void deposit(double amount) {
-
         balance += amount;
-
-        accountDao.updateBalance(this); // DB 잔액 동기화
-
-        System.out.println(
-                amount + "원 입금 완료");
     }
 
-    // UML : 출금 — 성공 시 true, 잔액 부족 시 false
+    // UML : 출금 — 성공 시 true, 잔액 부족 시 false (출력/DB 없음, 순수)
     boolean withdraw(double amount) {
-
         if (balance >= amount) {
-
             balance -= amount;
-
-            accountDao.updateBalance(this); // DB 잔액 동기화
-
-            System.out.println(
-                    amount + "원 출금 완료");
             return true;
         }
-        else {
-            System.out.println(">> [오류] 잔액 부족 (현재 잔액 : " + balance + "원)");
-            return false;
-        }
+        return false;
     }
 
     public double getBalance() {
@@ -73,14 +54,5 @@ class Account {
 
     public String getAccountPassword() {
         return accountPassword;
-    }
-
-    public void printInfo() {
-
-        System.out.println(
-                "계좌번호 : " + accountNumber);
-
-        System.out.println(
-                "잔액 : " + balance);
     }
 }
