@@ -75,78 +75,90 @@ UML 클래스/시퀀스 다이어그램 설계를 기반으로 **SOLID 원칙**�
 
 ### 클래스 다이어그램
 
+> 표현 → 서비스 → 도메인 → 영속의 **4계층을 위에서 아래로** 배치(`direction TB`)하고,
+> 각 계층을 `namespace` 박스로 묶었습니다. 의존성 화살표가 모두 아래(또는 추상)를 향합니다.
+
 ```mermaid
 classDiagram
-    direction LR
+    direction TB
 
-    class Main {
-        +main(String[]) void$
-        -reportResult(TransactionResult, String, Account) void$
+    namespace Presentation {
+        class Main {
+            +main(String[]) void $            -reportResult(TransactionResult, String, Account) void$
+        }
     }
-    class Bank {
-        -BankRepository repo
-        +authenticate(id, pw) Customer
-        +openAccount(Customer, long, String) Account
-        +deposit(Account, pin, long) TransactionResult
-        +withdraw(Account, pin, long) TransactionResult
-        +transfer(Account, pin, String, long) TransactionResult
-        +transfer(Account, pin, Account, long) TransactionResult
+
+    namespace Service {
+        class Bank {
+            -BankRepository repo
+            +authenticate(id, pw) Customer
+            +openAccount(Customer, long, String) Account
+            +deposit(Account, pin, long) TransactionResult
+            +withdraw(Account, pin, long) TransactionResult
+            +transfer(Account, pin, String, long) TransactionResult
+            +transfer(Account, pin, Account, long) TransactionResult
+        }
     }
-    class Customer {
-        -String customerId
-        -String name
-        +openAccount(Bank, long, String) Account
+
+    namespace Domain {
+        class Customer {
+            -String customerId
+            -String name
+            +openAccount(Bank, long, String) Account
+        }
+        class Account {
+            -String accountNumber
+            -long balance
+            -String accountPassword
+            +authenticateAccount(no, pw) boolean
+            ~deposit(long) void
+            ~withdraw(long) boolean
+            +toString() String
+        }
+        class TransactionTemplate {
+            <<abstract>>
+            #BankRepository repo
+            +run(Account, pin, long) TransactionResult
+            #apply(Account, long) boolean *
+            #affectedAccounts(Account) List~Account~ *
+            #record(Account, long) TransactionRecord *
+        }
+        class DepositTransaction
+        class WithdrawTransaction
+        class TransferTransaction {
+            -Account target
+        }
+        class TransactionRecord {
+            -String type
+            -long amount
+            +label() String
+            +toString() String
+        }
+        class TransactionResult {
+            <<enumeration>>
+            SUCCESS
+            WRONG_PIN
+            INSUFFICIENT_FUNDS
+            INVALID_AMOUNT
+            ACCOUNT_NOT_FOUND
+            SELF_TRANSFER
+        }
     }
-    class Account {
-        -String accountNumber
-        -long balance
-        -String accountPassword
-        +authenticateAccount(no, pw) boolean
-        ~deposit(long) void
-        ~withdraw(long) boolean
-        +toString() String
-    }
-    class TransactionTemplate {
-        <<abstract>>
-        #BankRepository repo
-        +run(Account, pin, long) TransactionResult
-        #apply(Account, long) boolean*
-        #affectedAccounts(Account) List~Account~*
-        #record(Account, long) TransactionRecord*
-    }
-    class DepositTransaction
-    class WithdrawTransaction
-    class TransferTransaction {
-        -Account target
-    }
-    class TransactionRecord {
-        -String type
-        -long amount
-        +label() String
-        +toString() String
-    }
-    class TransactionResult {
-        <<enumeration>>
-        SUCCESS
-        WRONG_PIN
-        INSUFFICIENT_FUNDS
-        INVALID_AMOUNT
-        ACCOUNT_NOT_FOUND
-        SELF_TRANSFER
-    }
-    class BankRepository {
-        <<interface>>
-        +findByCredentials(id, pw) Customer
-        +updateBalance(Account) void
-        +insertHistory(TransactionRecord) void
-        +findAccount(no) Account
-        +runInTransaction(Runnable) void
-    }
-    class H2BankRepository
-    class Database {
-        -Connection connection$
-        +getConnection() Connection$
-        +init() void$
+
+    namespace Persistence {
+        class BankRepository {
+            <<interface>>
+            +findByCredentials(id, pw) Customer
+            +updateBalance(Account) void
+            +insertHistory(TransactionRecord) void
+            +findAccount(no) Account
+            +runInTransaction(Runnable) void
+        }
+        class H2BankRepository
+        class Database {
+            -Connection connection $            +getConnection() Connection$
+            +init() void $
+        }
     }
 
     Main ..> Bank
@@ -166,6 +178,7 @@ classDiagram
     H2BankRepository ..> Database
 ```
 
+- **계층 박스(namespace)**: 위에서부터 Presentation(표현) → Service(서비스) → Domain(도메인) → Persistence(영속).
 - **상속(▷)**: `TransactionTemplate` ← 세 거래 클래스 (Template Method).
 - **실현(▷ 점선)**: `BankRepository` ← `H2BankRepository` (DIP).
 - **집약(◇)**: `Bank`·`TransactionTemplate`가 `BankRepository`를 보유.
@@ -173,8 +186,70 @@ classDiagram
 
 ### 시퀀스 다이어그램 (전체 흐름)
 
-메뉴별 주요 시나리오를 코드 흐름 그대로 시퀀스로 옮겼습니다.
+먼저 **0. 전체 구조(개요)** 로 앱 생애주기의 큰 줄기를 보인 뒤, **①~⑧ 상세** 다이어그램에서 각 시나리오를 코드 흐름 그대로 파고듭니다.
 `Main`(표현) → `Bank`(서비스) → 거래 템플릿/도메인 → `H2BankRepository`/`Database`(영속)의 계층 호출 방향이 일관됩니다.
+
+> 발표용 팁 — 한 장에 전체를 욱여넣으면 `alt`/`loop` 중첩으로 가독성이 무너지므로(시퀀스 다이어그램은 "1 시나리오 = 1 다이어그램"이 정석),
+> 개요 슬라이드로 맥락을 깔고 상세 슬라이드(①~⑧)로 드릴다운하는 구성을 권장합니다. 각 개요 블록의 Note가 대응하는 상세 번호를 가리킵니다.
+
+#### 0. 전체 구조 (개요) — 부팅 → 인증 → 개설 → (거래·조회 루프) → 종료
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 사용자
+    box 표현
+        participant M as Main
+    end
+    box 서비스·도메인
+        participant B as Bank
+        participant T as TransactionTemplate
+    end
+    box 영속
+        participant R as H2BankRepository / Database
+    end
+
+    Note over M,R: ① 부팅 — Database.init() · Bank 배선 · 시드 계좌
+
+    rect rgb(245,245,245)
+    Note over U,R: 인증 (가입 / 로그인)  ▶ 상세 ②·③
+    U->>M: 메뉴 1
+    M->>B: register / authenticate
+    B->>R: insertCustomer / findByCredentials
+    R-->>M: Customer (+ 계좌 복원)
+    end
+
+    rect rgb(245,245,245)
+    Note over U,R: 계좌 개설 / 복원  ▶ 상세 ④
+    U->>M: 메뉴 2
+    M->>B: openAccount
+    B->>R: insertAccount
+    end
+
+    loop 세션 루프 (로그아웃까지)
+        rect rgb(235,242,250)
+        Note over U,R: 거래 (입금·출금·송금)  ▶ 상세 ⑥·⑦
+        U->>M: 메뉴 4·5·6 + PIN
+        M->>B: deposit / withdraw / transfer
+        B->>T: run(source, pin, amount)
+        T->>T: ①PIN ②금액 ③apply
+        T->>R: runInTransaction(updateBalance×N + insertHistory)
+        R-->>U: TransactionResult → 한글 메시지
+        end
+
+        rect rgb(235,242,250)
+        Note over U,R: 조회  ▶ 상세 ⑧
+        U->>M: 메뉴 7
+        M->>B: recentHistory
+        B->>R: findRecentHistory
+        R-->>U: toString() 출력
+        end
+    end
+
+    Note over M,R: 종료 — 공유 커넥션 닫기
+```
+
+> ⑤(계좌 비밀번호 검증)은 거래 게이트와 별개인 메뉴 3 단독 흐름이라 개요에서는 생략하고 상세에서만 다룹니다.
 
 #### ① 앱 시작 & 메인 루프
 
