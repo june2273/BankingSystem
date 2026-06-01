@@ -58,60 +58,26 @@ class Bank {
         return repo.findAccount(accountNumber);
     }
 
-    // UML : 계좌인증 — case 3 보조 메뉴 + 거래 PIN 게이트 공용
-    public boolean verifyAccountPassword(Account account, String pin) {
-        return account.authenticateAccount(account.getAccountNumber(), pin);
-    }
-
     // 계좌의 최근 거래내역 limit건 조회 (계좌 정보 최종 조회용)
     public List<TransactionRecord> recentHistory(String accountNumber, int limit) {
         return repo.findRecentHistory(accountNumber, limit);
     }
 
-    // ===== 거래 (PIN 검증 게이트 내장 → 전략 실행 → 성공 시에만 영속화) =====
-
-    // 공통 거래 골격(합성으로 구현한 템플릿 메소드). 변하지 않는 뼈대(①PIN검증 ②금액검증 ③전략실행
-    // ④영속화)는 여기 고정하고, 달라지는 단계(전략·영속 대상·기록)만 인자로 위임받는다.
-    //   · 세 거래의 검증 로직 중복을 제거하고, ④ 영속화를 runInTransaction으로 감싸 원자성을 보장한다.
-    private TransactionResult settle(Account source, String pin, long amount,
-                                     Transaction strategy,
-                                     List<Account> affected,
-                                     TransactionRecord record) {
-        if (!verifyAccountPassword(source, pin)) {       // ① 공통 — PIN 검증 게이트
-            return TransactionResult.WRONG_PIN;
-        }
-        if (amount <= 0) {                               // ② 공통 — 금액 검증
-            return TransactionResult.INVALID_AMOUNT;
-        }
-        if (!source.performTransaction(strategy)) {      // ③ 가변 — 도메인 전략 실행
-            return TransactionResult.INSUFFICIENT_FUNDS;
-        }
-        repo.runInTransaction(() -> {                    // ④ 성공 시에만 — 원자적 영속화
-            for (Account a : affected) {
-                repo.updateBalance(a);
-            }
-            repo.insertHistory(record);
-        });
-        return TransactionResult.SUCCESS;
-    }
+    // ===== 거래 — 진짜 Template Method(TransactionTemplate)에 위임 =====
+    //   · 공통 골격(①PIN ②금액 ③도메인연산 ④원자영속화)은 TransactionTemplate.run()이 final로 고정.
+    //   · Bank(서비스)는 거래 종류에 맞는 템플릿을 골라 실행(디스패치)만 한다.
 
     public TransactionResult deposit(Account account, String pin, long amount) {
-        return settle(account, pin, amount,
-                new DepositTransaction(amount),
-                List.of(account),
-                new TransactionRecord(account.getAccountNumber(), "DEPOSIT", amount, null));
+        return new DepositTransaction(repo).run(account, pin, amount);
     }
 
     public TransactionResult withdraw(Account account, String pin, long amount) {
-        return settle(account, pin, amount,
-                new WithdrawTransaction(amount),
-                List.of(account),
-                new TransactionRecord(account.getAccountNumber(), "WITHDRAW", amount, null));
+        return new WithdrawTransaction(repo).run(account, pin, amount);
     }
 
     // 대상을 계좌번호로 받는 송금 — 대상 조회 후 객체 버전에 위임
     public TransactionResult transfer(Account source, String pin, String targetNo, long amount) {
-        if (targetNo.equals(source.getAccountNumber())) {   // P2 불변식 — 자기송금 금지(서비스에서 강제)
+        if (targetNo.equals(source.getAccountNumber())) {   // 불변식 — 자기송금 금지(서비스에서 강제)
             return TransactionResult.SELF_TRANSFER;
         }
         Account target = repo.findAccount(targetNo);
@@ -123,14 +89,10 @@ class Bank {
 
     // 메서드 오버로딩 — 호출부가 이미 대상 Account를 들고 있을 때 조회를 생략
     public TransactionResult transfer(Account source, String pin, Account target, long amount) {
-        if (target.getAccountNumber().equals(source.getAccountNumber())) {  // P2 불변식 — 자기송금 금지
+        if (target.getAccountNumber().equals(source.getAccountNumber())) {  // 불변식 — 자기송금 금지
             return TransactionResult.SELF_TRANSFER;
         }
-        return settle(source, pin, amount,
-                new TransferTransaction(amount, target),
-                List.of(source, target),                    // 출금·입금 계좌를 한 트랜잭션에서 함께 갱신
-                new TransactionRecord(source.getAccountNumber(), "TRANSFER", amount,
-                        target.getAccountNumber()));
+        return new TransferTransaction(repo, target).run(source, pin, amount);
     }
 
     // 시연용 가상 송금 대상 계좌(200-5678)를 DB에 1회 시드. system 고객을 소유자로 사용.

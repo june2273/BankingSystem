@@ -1,20 +1,24 @@
-// 출금 거래 — 순수 도메인 연산. 잔액 부족 시 false (DB 기록·출력은 Bank가 담당)
-//   · Transaction(실행) + Describable(설명)을 동시에 구현 — 다중 인터페이스 구현(자바식 다중 상속).
-class WithdrawTransaction implements Transaction, Describable {
+import java.util.List;
 
-    private long amount;
+// 출금 거래 — 잔액 부족 시 apply()가 false → 상위 run()이 INSUFFICIENT_FUNDS 반환.
+class WithdrawTransaction extends TransactionTemplate {
 
-    public WithdrawTransaction(long amount) {
-        this.amount = amount;
+    WithdrawTransaction(BankRepository repo) {
+        super(repo);
     }
 
     @Override
-    public boolean execute(Account account) {
-        return account.withdraw(amount); // 잔액 충분 시 true
+    protected boolean apply(Account source, long amount) {
+        return source.withdraw(amount); // 잔액 충분 시 true
     }
 
     @Override
-    public String describe() {
-        return "출금 " + amount + "원";
+    protected List<Account> affectedAccounts(Account source) {
+        return List.of(source);
+    }
+
+    @Override
+    protected TransactionRecord record(Account source, long amount) {
+        return new TransactionRecord(source.getAccountNumber(), "WITHDRAW", amount, null);
     }
 }

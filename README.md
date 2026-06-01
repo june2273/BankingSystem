@@ -4,7 +4,7 @@ Java로 구현한 콘솔 기반 은행 전산 시스템입니다. 고객 관리,
 모든 데이터는 **H2 임베디드 데이터베이스**에 영구 저장됩니다.
 
 UML 클래스/시퀀스 다이어그램 설계를 기반으로 **SOLID 원칙**에 따라 표현 → 서비스 → 도메인 → 영속의
-네 계층으로 분리했고, 거래는 **Strategy(전략) 패턴**, 영속은 **Repository 패턴**으로 구현했습니다.
+네 계층으로 분리했고, 거래는 **Template Method(템플릿 메소드) 패턴**, 영속은 **Repository 패턴**으로 구현했습니다.
 모든 거래는 **계좌 비밀번호(PIN) 검증 게이트**를 통과해야 하며, 송금처럼 잔액이 여러 계좌에 걸쳐
 바뀌는 거래는 **하나의 트랜잭션으로 원자적으로** 처리됩니다.
 
@@ -40,30 +40,29 @@ UML 클래스/시퀀스 다이어그램 설계를 기반으로 **SOLID 원칙**�
 ```
 [표현]   Main                         ── 메뉴/입력/출력, PIN 입력, TransactionResult 분기
    │                                     (시스템에서 콘솔에 출력하는 유일한 계층)
-[서비스] Bank                         ── 업무 조율 + PIN 검증 게이트 + 원자적 영속화 위임 (출력 없음)
+[서비스] Bank                         ── 업무 조율 + 거래 템플릿 디스패치 (출력 없음)
    │      deposit/withdraw/transfer(account, pin, amount) → TransactionResult
    ├──> [도메인] 고객 (Customer) · 계좌 (Account, 순수)
-   │             거래 (Transaction) ─┬── 입금 (DepositTransaction)
-   │             + 설명 (Describable) ├── 출금 (WithdrawTransaction)
-   │                                  └── 송금 (TransferTransaction)
+   │             거래 골격 (TransactionTemplate, 추상) ─┬── 입금 (DepositTransaction)
+   │                                                     ├── 출금 (WithdrawTransaction)
+   │                                                     └── 송금 (TransferTransaction)
    │             거래이력 (TransactionRecord) · TransactionResult (enum)
    └──> [영속]   BankRepository (interface) ──> H2BankRepository ──> Database (H2 연결/스키마)
                  (customers · accounts · transactions 3테이블의 모든 JDBC를 한곳에 격리)
 ```
 
-**클래스 13개 + `Main`.** 거래·영속의 정합성(원자성)과 OOP 개념 시연을 확보하면서도 설계 제약을 지켰습니다.
+**클래스 12개 + `Main`.** 거래·영속의 정합성(원자성)과 OOP 개념 시연을 확보하면서도 설계 제약을 지켰습니다.
 
 ### 소스 구성
 
 | 파일 | 계층 | 역할 |
 |------|------|------|
 | `Main.java` | 표현 | 콘솔 메뉴 루프 + PIN 입력 + 결과 출력 (진입점, 유일한 출력 담당) |
-| `Bank.java` | 서비스 | 업무 조율 + PIN 게이트 + 원자적 영속화 위임 (`settle()` 공통 골격) |
+| `Bank.java` | 서비스 | 업무 조율 + 거래 종류에 맞는 템플릿 선택·실행(디스패치) |
 | `Customer.java` | 도메인 | 고객 도메인 객체 (순수) |
 | `Account.java` | 도메인 | 계좌 도메인 객체 (순수 — DB/출력 없음, 잔액 `long`) |
-| `Transaction.java` | 도메인 | 거래 전략 인터페이스 (`boolean execute`) |
-| `Describable.java` | 도메인 | 설명 능력 인터페이스 (`default String describe()`) |
-| `DepositTransaction` / `WithdrawTransaction` / `TransferTransaction` | 도메인 | 거래 전략 구현 (`Transaction` + `Describable` 동시 구현) |
+| `TransactionTemplate.java` | 도메인 | **추상 클래스** — 거래 공통 골격(`final run()`) + 추상 원시연산 3개 |
+| `DepositTransaction` / `WithdrawTransaction` / `TransferTransaction` | 도메인 | `TransactionTemplate`을 **상속**해 원시연산(`apply`·`affectedAccounts`·`record`)만 구현 |
 | `TransactionRecord.java` | 도메인 | 거래이력 값 객체 + 한글 라벨 + `toString()` |
 | `TransactionResult.java` | 도메인 | 거래 결과 enum (Result Object) |
 | `BankRepository.java` | 영속 | **인터페이스** — 영속 계약 (3테이블 CRUD + `runInTransaction`) |
@@ -72,68 +71,419 @@ UML 클래스/시퀀스 다이어그램 설계를 기반으로 **SOLID 원칙**�
 
 ---
 
+## UML 다이어그램
+
+### 클래스 다이어그램
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Main {
+        +main(String[]) void$
+        -reportResult(TransactionResult, String, Account) void$
+    }
+    class Bank {
+        -BankRepository repo
+        +authenticate(id, pw) Customer
+        +openAccount(Customer, long, String) Account
+        +deposit(Account, pin, long) TransactionResult
+        +withdraw(Account, pin, long) TransactionResult
+        +transfer(Account, pin, String, long) TransactionResult
+        +transfer(Account, pin, Account, long) TransactionResult
+    }
+    class Customer {
+        -String customerId
+        -String name
+        +openAccount(Bank, long, String) Account
+    }
+    class Account {
+        -String accountNumber
+        -long balance
+        -String accountPassword
+        +authenticateAccount(no, pw) boolean
+        ~deposit(long) void
+        ~withdraw(long) boolean
+        +toString() String
+    }
+    class TransactionTemplate {
+        <<abstract>>
+        #BankRepository repo
+        +run(Account, pin, long) TransactionResult
+        #apply(Account, long) boolean*
+        #affectedAccounts(Account) List~Account~*
+        #record(Account, long) TransactionRecord*
+    }
+    class DepositTransaction
+    class WithdrawTransaction
+    class TransferTransaction {
+        -Account target
+    }
+    class TransactionRecord {
+        -String type
+        -long amount
+        +label() String
+        +toString() String
+    }
+    class TransactionResult {
+        <<enumeration>>
+        SUCCESS
+        WRONG_PIN
+        INSUFFICIENT_FUNDS
+        INVALID_AMOUNT
+        ACCOUNT_NOT_FOUND
+        SELF_TRANSFER
+    }
+    class BankRepository {
+        <<interface>>
+        +findByCredentials(id, pw) Customer
+        +updateBalance(Account) void
+        +insertHistory(TransactionRecord) void
+        +findAccount(no) Account
+        +runInTransaction(Runnable) void
+    }
+    class H2BankRepository
+    class Database {
+        -Connection connection$
+        +getConnection() Connection$
+        +init() void$
+    }
+
+    Main ..> Bank
+    Main ..> TransactionResult
+    Customer ..> Bank
+    Bank o-- BankRepository
+    Bank ..> TransactionTemplate
+    TransactionTemplate o-- BankRepository
+    TransactionTemplate ..> Account
+    TransactionTemplate ..> TransactionRecord
+    TransactionTemplate ..> TransactionResult
+    TransactionTemplate <|-- DepositTransaction
+    TransactionTemplate <|-- WithdrawTransaction
+    TransactionTemplate <|-- TransferTransaction
+    TransferTransaction --> Account : target
+    BankRepository <|.. H2BankRepository
+    H2BankRepository ..> Database
+```
+
+- **상속(▷)**: `TransactionTemplate` ← 세 거래 클래스 (Template Method).
+- **실현(▷ 점선)**: `BankRepository` ← `H2BankRepository` (DIP).
+- **집약(◇)**: `Bank`·`TransactionTemplate`가 `BankRepository`를 보유.
+- **연관(→)**: `TransferTransaction`이 입금 대상 `Account`를 참조.
+
+### 시퀀스 다이어그램 (전체 흐름)
+
+메뉴별 주요 시나리오를 코드 흐름 그대로 시퀀스로 옮겼습니다.
+`Main`(표현) → `Bank`(서비스) → 거래 템플릿/도메인 → `H2BankRepository`/`Database`(영속)의 계층 호출 방향이 일관됩니다.
+
+#### ① 앱 시작 & 메인 루프
+
+```mermaid
+sequenceDiagram
+    participant Main
+    participant DB as Database
+    participant Bank
+    participant Repo as H2BankRepository
+
+    Main->>DB: Database.init()
+    DB->>DB: getConnection() — 단일 공유 연결
+    DB->>DB: CREATE TABLE IF NOT EXISTS ×3
+    Main->>Bank: new Bank(new H2BankRepository())
+    Main->>Bank: ensureTargetAccount()
+    Bank->>Repo: existsCustomer("system") / existsAccount("200-5678")
+    Repo-->>Bank: 없으면 system 고객 + 200-5678 계좌 시드
+    loop 종료 전까지
+        Main->>Main: 메뉴 출력 + 번호 입력 분기
+    end
+```
+
+#### ② 회원가입 → 자동 로그인 (메뉴 1-2)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Bank
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 성함 / 주민번호 입력
+    Main->>Bank: isSsnRegistered(ssn)
+    Bank->>Repo: existsBySsn(ssn)
+    Repo->>DB: SELECT customers WHERE ssn
+    DB-->>Bank: 가입 여부
+    loop 아이디 중복/공백 확인
+        User->>Main: 사용자 ID 입력
+        Main->>Bank: isIdTaken(id)
+        Bank->>Repo: existsCustomer(id)
+        Repo->>DB: SELECT customers WHERE customer_id
+    end
+    User->>Main: 비밀번호 입력
+    Main->>Bank: register(new Customer(...))
+    Bank->>Repo: insertCustomer(customer)
+    Repo->>DB: INSERT customers
+    Note over Main: 가입 직후 동일 자격으로 자동 로그인
+    Main->>Bank: authenticate(id, pwd)
+    Bank->>Repo: findByCredentials(id, pwd)
+    Repo->>DB: SELECT customers WHERE id AND password
+    DB-->>Bank: Customer
+    Main->>Bank: loadAccount(customer)
+    Bank->>Repo: findFirstAccount(customerId)
+    DB-->>Main: null (신규 — 아직 계좌 없음)
+    Main-->>User: 로그인 성공
+```
+
+#### ③ 로그인 & 세션·계좌 복원 (메뉴 1-1)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Bank
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 아이디 / 비밀번호 입력
+    Main->>Bank: authenticate(id, pwd)
+    Bank->>Repo: findByCredentials(id, pwd)
+    Repo->>DB: SELECT customers
+    alt 인증 성공
+        DB-->>Bank: Customer
+        Main->>Bank: loadAccount(customer)
+        Bank->>Repo: findFirstAccount(customerId)
+        Repo->>DB: SELECT accounts ORDER BY account_number LIMIT 1
+        DB-->>Main: Account — 재실행 후 잔액 복원
+        Main-->>User: 로그인 성공 + 기존 계좌 안내
+    else 인증 실패
+        DB-->>Bank: 없음(null)
+        Main-->>User: 로그인 실패 — 세션 초기화
+    end
+```
+
+#### ④ 신규 계좌 개설 (메뉴 2)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Customer
+    participant Bank
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 메뉴 2 (로그인 상태)
+    Main->>Bank: hasAccount(loginCustomer)
+    Bank->>Repo: existsAccountByCustomer(customerId)
+    Repo->>DB: SELECT accounts WHERE customer_id
+    alt 이미 보유
+        Main-->>User: 1인 1계좌 — 개설 불가
+    else 미보유
+        User->>Main: 초기 예치금 / 계좌 비밀번호
+        Main->>Customer: openAccount(bank, initialBalance, pwd)
+        Customer->>Bank: openAccount(this, initialBalance, pwd)
+        Bank->>Repo: countMainAccounts()
+        Repo->>DB: SELECT COUNT(*) accounts LIKE '100-%'
+        DB-->>Bank: count
+        Note over Bank: accountNumber = "100-" + (1000 + count)
+        Bank->>Repo: insertAccount(account, customerId)
+        Repo->>DB: INSERT accounts
+        Bank-->>Main: Account
+        Main-->>User: 계좌번호 안내 (예: 100-1000)
+    end
+```
+
+#### ⑤ 계좌 비밀번호 검증 (메뉴 3 — 순수 도메인, DB 없음)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Account
+
+    User->>Main: 계좌번호 / 비밀번호 입력
+    Main->>Account: authenticateAccount(checkNum, checkPwd)
+    Note over Account: 순수 도메인 — DB 접근 없음
+    Account-->>Main: true / false
+    Main-->>User: 일치 / 불일치 안내
+```
+
+#### ⑥ 입금 · 출금 (메뉴 4/5 — Template Method 공통 골격)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Bank
+    participant T as DepositTransaction · WithdrawTransaction
+    participant Acc as Account
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 금액 / 계좌 PIN 입력
+    Main->>Bank: deposit / withdraw(account, pin, amount)
+    Bank->>T: new ...Transaction(repo).run(account, pin, amount)
+    T->>Acc: authenticateAccount(no, pin)
+    Acc-->>T: true / false
+    alt PIN 불일치
+        T-->>Main: WRONG_PIN
+    else amount ≤ 0
+        T-->>Main: INVALID_AMOUNT
+    else 검증 통과
+        T->>Acc: apply() → deposit / withdraw(amount)
+        Acc-->>T: true (출금은 잔액 부족 시 false → INSUFFICIENT_FUNDS)
+        T->>Repo: runInTransaction(work)
+        Repo->>DB: setAutoCommit(false)
+        Repo->>DB: UPDATE accounts balance
+        Repo->>DB: INSERT transactions
+        Repo->>DB: commit() / 실패 시 rollback()
+        T-->>Main: SUCCESS
+    end
+    Main-->>User: reportResult — 메시지 + 현재 잔액
+```
+
+#### ⑦ 송금 (메뉴 6 — 두 계좌 + 거래내역의 원자적 처리)
+
+가장 복잡한 흐름(PIN 게이트 → 도메인 연산 → 두 계좌+거래내역의 원자적 영속화 → commit/rollback)입니다.
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Bank
+    participant T as TransferTransaction
+    participant Src as 출금계좌(Account)
+    participant Tgt as 입금계좌(Account)
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 메뉴 6 + 대상계좌/금액/PIN
+    Main->>Bank: transfer(source, pin, targetNo, amount)
+    Bank->>Repo: findAccount(targetNo)
+    Repo->>DB: SELECT accounts
+    DB-->>Repo: row
+    Repo-->>Bank: target Account
+    Note over Bank: 자기송금 가드 → SELF_TRANSFER
+    Bank->>T: new TransferTransaction(repo, target).run(source, pin, amount)
+
+    T->>Src: authenticateAccount(no, pin)
+    Src-->>T: true / false
+    alt PIN 불일치
+        T-->>Bank: WRONG_PIN
+    else amount ≤ 0
+        T-->>Bank: INVALID_AMOUNT
+    else 검증 통과
+        T->>Src: withdraw(amount)
+        Src-->>T: true
+        T->>Tgt: deposit(amount)
+        T->>Repo: runInTransaction(work)
+        Repo->>DB: setAutoCommit(false)
+        Repo->>DB: UPDATE 출금계좌 balance
+        Repo->>DB: UPDATE 입금계좌 balance
+        Repo->>DB: INSERT transactions
+        alt 모두 성공
+            Repo->>DB: commit()
+            T-->>Bank: SUCCESS
+        else 도중 실패
+            Repo->>DB: rollback()
+            Repo-->>T: RuntimeException (거래 무효)
+        end
+    end
+    Bank-->>Main: TransactionResult
+    Main-->>User: 결과 메시지 + 현재 잔액
+```
+
+#### ⑧ 계좌 정보 최종 조회 (메뉴 7)
+
+```mermaid
+sequenceDiagram
+    actor User as 사용자
+    participant Main
+    participant Acc as Account
+    participant Bank
+    participant Repo as H2BankRepository
+    participant DB as H2
+
+    User->>Main: 메뉴 7
+    Main->>Acc: toString()
+    Acc-->>Main: "계좌번호 ... / 잔액 ...원" (다형적 출력)
+    Main->>Bank: recentHistory(accountNumber, 3)
+    Bank->>Repo: findRecentHistory(no, 3)
+    Repo->>DB: SELECT transactions ORDER BY id DESC LIMIT 3
+    DB-->>Repo: rows
+    Repo-->>Main: 거래내역 목록
+    loop 각 거래내역
+        Main->>Main: println(record.toString())
+    end
+    Main-->>User: 계좌 명세 + 최근 거래내역(최대 3건)
+```
+
+---
+
 ## 적용된 객체지향(OOP) 개념
 
 | 개념 | 적용 위치 | 설명 |
 |------|-----------|------|
-| **캡슐화 (Encapsulation)** | `Account` | 잔액·비밀번호는 `private`. `deposit/withdraw`는 **패키지 전용**이라 외부는 오직 `performTransaction(거래)`을 통해서만 잔액을 바꿀 수 있음 |
-| **추상화 (Abstraction)** | `Transaction`, `BankRepository` | "무엇을 하는가"(인터페이스)와 "어떻게 하는가"(구현체)를 분리. 서비스는 추상화에만 의존 |
-| **상속 + 오버라이딩 (다형성)** | `Account.toString()`, `TransactionRecord.toString()` | `Object.toString()`을 **재정의** → `System.out.println(account)`처럼 다형적으로 출력. 손수 조립하던 문자열을 표준 메서드로 일원화 |
+| **캡슐화 (Encapsulation)** | `Account` | 잔액·비밀번호는 `private`. `deposit/withdraw`는 **패키지 전용**이라 외부는 거래 템플릿을 통해서만 잔액을 바꿀 수 있음 |
+| **추상화 (Abstraction)** | `TransactionTemplate`(추상 클래스), `BankRepository`(인터페이스) | "무엇을 하는가"(골격/계약)와 "어떻게 하는가"(원시연산/구현체)를 분리. 서비스는 추상화에만 의존 |
+| **상속 + 오버라이딩 (다형성)** | `TransactionTemplate` ← 세 거래, `Account/TransactionRecord.toString()` | 추상 클래스를 **상속**해 원시연산만 재정의하고, `Object.toString()` 재정의로 `println(account)`처럼 **다형적**으로 출력 |
 | **메서드/생성자 오버로딩 (컴파일타임 다형성)** | `Bank.transfer(...)`, `Account(...)` | `transfer`는 대상을 **계좌번호(String)** 로도, **이미 가진 Account 객체**로도 받음. `Account`는 잔액 `0L` 기본 생성자와 초기 잔액 생성자 2형태 |
-| **다중 인터페이스 + `default` = 자바식 다중상속** | 세 거래 전략 | 각 거래가 `Transaction`(실행 능력) **그리고** `Describable`(설명 능력)을 동시 구현. 클래스 다중상속 대신 인터페이스 다중 구현 + `default` 메서드로 행위를 상속 |
 
 ---
 
 ## 적용된 SOLID 원칙
 
 - **SRP (단일 책임)** — 계층별로 책임을 하나씩만 가집니다. 출력은 `Main`만, 업무 조율은 `Bank`만,
-  JDBC는 `H2BankRepository`만, 잔액 상태 변경은 `Account`만 담당합니다. 도메인(`Account`·거래 전략)은
-  DB도 출력도 가지지 않는 **순수 객체**입니다.
-- **OCP (개방-폐쇄)** — 새 거래 종류는 `Transaction`을 구현한 클래스를 **추가**하기만 하면 되고,
-  `Bank.settle()` 골격이나 기존 거래는 **수정하지 않습니다**. 거래 종류→한글 라벨 매핑도
-  `TransactionRecord` 한곳에 모아 변경 파급을 막았습니다.
-- **LSP / DIP (의존성 역전)** — `Bank`는 구체 클래스가 아닌 **`BankRepository` 인터페이스**에만 의존합니다.
-  H2 대신 InMemory 구현으로 갈아끼워도 `Bank`는 **한 줄도 바뀌지 않습니다**(배선은 `Main` 한 줄).
-- **ISP (인터페이스 분리)** — `Transaction`(실행)과 `Describable`(설명)을 **작은 역할 단위**로 나눠,
-  필요한 능력만 골라 구현하게 했습니다.
+  JDBC는 `H2BankRepository`만, 잔액 상태 변경은 `Account`만 담당합니다. 거래 골격의 도메인 연산(`apply`)은
+  **DB를 모르는 순수 연산**이고, `Account`도 DB/출력을 가지지 않는 **순수 객체**입니다.
+- **OCP (개방-폐쇄)** — 새 거래 종류는 `TransactionTemplate`을 **상속**한 클래스를 추가하기만 하면 되고,
+  `run()` 골격이나 기존 거래는 **수정하지 않습니다**. 거래 종류→한글 라벨 매핑도 `TransactionRecord`
+  한곳에 모아 변경 파급을 막았습니다.
+- **LSP (리스코프 치환)** — 세 거래 클래스는 모두 `TransactionTemplate.run()` 계약(검증→연산→영속화)을
+  지키므로, 어떤 하위형으로 바꿔도 골격이 동일하게 동작합니다.
+- **DIP (의존성 역전)** — `Bank`와 거래 템플릿은 구체 클래스가 아닌 **`BankRepository` 인터페이스**에만
+  의존합니다. H2 대신 InMemory 구현으로 갈아끼워도 핵심 로직은 **바뀌지 않습니다**(배선은 `Main` 한 줄).
+- **ISP (인터페이스 분리)** — 표현·서비스 계층은 필요한 추상(`BankRepository`)에만 의존하고 JDBC·커넥션
+  세부는 보지 않습니다. `BankRepository`는 영속에 필요한 연산만 노출합니다.
 
 ---
 
 ## 적용된 디자인 패턴
 
-### 1. Strategy (전략) 패턴 — 거래
-`Account.deposit/withdraw`는 패키지 전용이고, 외부는 오직 `performTransaction(Transaction)`을 통해서만
-거래를 실행합니다. 입금·출금·송금은 각각 `Transaction.execute(계좌)`를 구현한 **교체 가능한 전략**이며,
-성공 여부(`boolean`)만 반환하는 순수 연산입니다.
-
-### 2. 합성 템플릿 메소드 (Composition Template Method) — `Bank.settle()`
-세 거래(`deposit/withdraw/transfer`)가 **①PIN 검증 → ②금액 검증 → ③전략 실행 → ④영속화**라는
-같은 골격을 가집니다. 하위 클래스를 만드는 대신, 변하지 않는 뼈대는 `Bank.settle()` private 헬퍼에
-모으고 **달라지는 단계(전략·영속 대상·기록)만 인자로 위임**했습니다. 중복 제거와 원자성을 한 번에 해결합니다.
+### 1. Template Method (템플릿 메소드) 패턴 — 거래 골격
+세 거래(`deposit/withdraw/transfer`)는 **①PIN 검증 → ②금액 검증 → ③도메인 연산 → ④원자적 영속화**라는
+같은 골격을 가집니다. 이 뼈대를 `TransactionTemplate.run()`에 **`final`로 고정**해 어떤 하위 클래스도
+순서를 바꾸거나 단계를 건너뛸 수 없게 하고, **거래마다 달라지는 부분만 추상 원시연산으로 위임**합니다.
 
 ```java
-private TransactionResult settle(Account source, String pin, long amount,
-                                 Transaction strategy, List<Account> affected,
-                                 TransactionRecord record) {
-    if (!verifyAccountPassword(source, pin)) return TransactionResult.WRONG_PIN;   // ① 공통
-    if (amount <= 0)                         return TransactionResult.INVALID_AMOUNT; // ② 공통
-    if (!source.performTransaction(strategy))                                        // ③ 가변(전략)
+public final TransactionResult run(Account source, String pin, long amount) {
+    if (!source.authenticateAccount(source.getAccountNumber(), pin))
+        return TransactionResult.WRONG_PIN;            // ① 공통 — PIN 게이트
+    if (amount <= 0)
+        return TransactionResult.INVALID_AMOUNT;       // ② 공통 — 금액 검증
+    if (!apply(source, amount))                        // ③ 가변 — 순수 도메인 연산
         return TransactionResult.INSUFFICIENT_FUNDS;
-    repo.runInTransaction(() -> {            // ④ 성공 시에만 — 원자적 영속화
-        for (Account a : affected) repo.updateBalance(a);
-        repo.insertHistory(record);
+    repo.runInTransaction(() -> {                      // ④ 가변 대상 — 원자적 영속화
+        for (Account a : affectedAccounts(source)) repo.updateBalance(a);
+        repo.insertHistory(record(source, amount));
     });
     return TransactionResult.SUCCESS;
 }
+protected abstract boolean apply(Account source, long amount);          // 잔액 변경(순수)
+protected abstract List<Account> affectedAccounts(Account source);      // 영속 대상
+protected abstract TransactionRecord record(Account source, long amount); // 거래 기록
 ```
 
-### 3. Repository 패턴 + 트랜잭션 경계 — 영속 원자성
+- 입금/출금은 `affectedAccounts`가 자기 계좌 1개, 송금은 출금·입금 계좌 2개를 돌려줘 **한 트랜잭션으로** 갱신됩니다.
+- 검증 로직 중복 제거와 송금 원자성을 **하나의 골격**으로 동시에 해결합니다.
+- `③ apply()`는 `BankRepository`를 모르는 **순수 도메인 연산**이라, 템플릿이 영속을 떠안아도 도메인은 깨끗하게 유지됩니다.
+
+### 2. Repository 패턴 + 트랜잭션 경계 — 영속 원자성
 모든 JDBC는 `H2BankRepository` 한 클래스에 격리됩니다. 송금처럼 **두 계좌의 잔액 + 거래내역**이
 함께 바뀌는 작업은 `runInTransaction(Runnable)`으로 감싸 **단일 공유 H2 커넥션** 위에서
 `auto-commit`을 끄고 실행합니다 — 전부 성공하면 `commit`, 도중 실패하면 `rollback`. 덕분에
 "출금만 반영되고 입금은 누락되는 돈 증발"이 원천 차단됩니다.
 
-### 4. Result Object 패턴 — `TransactionResult`
+### 3. Result Object 패턴 — `TransactionResult`
 거래 한 건의 처리 결과를 **예외가 아닌 enum 한 값**으로 표현합니다. 서비스는 값만 반환하고,
 한글 메시지 매핑은 표현 계층(`Main`)이 담당해 계층 경계를 깔끔하게 유지합니다.
 
@@ -141,12 +491,13 @@ private TransactionResult settle(Account source, String pin, long amount,
 
 ## 핵심 설계 결정
 
-- **PIN 검증 게이트 (보안)** — 모든 거래는 `settle()` 첫 단계에서 `계좌인증(authenticateAccount)`을 통과해야
-  합니다. 검증을 **서비스 계층에서 강제**하므로 UI를 우회해도 뚫리지 않습니다. (메뉴 3은 별도 '사전 확인' 용도)
-- **불변식은 서비스에 (P2)** — "본인 계좌로 송금 금지"를 `Bank.transfer` 첫머리로 옮겨, 서비스 직접 호출 시에도
+- **PIN 검증 게이트 (보안)** — 모든 거래는 `TransactionTemplate.run()` 첫 단계에서
+  `계좌인증(authenticateAccount)`을 통과해야 합니다. 검증을 **거래 골격에서 강제**하므로 UI를 우회해도
+  뚫리지 않습니다. (메뉴 3은 별도 '사전 확인' 용도)
+- **불변식은 서비스에** — "본인 계좌로 송금 금지"를 `Bank.transfer` 첫머리에 두어, 서비스 직접 호출 시에도
   `SELF_TRANSFER`로 차단합니다(UI 가드는 조기 안내용 보조).
 - **금액은 `long` (원 단위 정수)** — 부동소수점 오차를 없애고 DB(`BIGINT`)와 타입을 일치시켰습니다.
-- **실패는 흔적 없음** — 전략이 성공한 뒤에만 영속화하므로, 실패한 거래(PIN 오류·잔액 부족·금액 오류·
+- **실패는 흔적 없음** — `apply()`가 성공한 뒤에만 영속화하므로, 실패한 거래(PIN 오류·잔액 부족·금액 오류·
   계좌 없음·자기송금)는 잔액도 거래내역도 바꾸지 않습니다.
 - **인증 구분** — `사용자인증`(은행 단위 로그인)과 `계좌인증`(계좌 단위 PIN 검증)을 분리합니다.
 
